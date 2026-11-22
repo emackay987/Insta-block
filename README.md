@@ -29,7 +29,9 @@ The Instagram app can't be modified, but Instagram in Safari can. Use the script
 1. Install **Userscripts** from the App Store and open it once. It asks you to pick a folder for scripts (for example `iCloud Drive/Userscripts`).
 2. Copy `userscript/insta-block-reels.user.js` into that folder (from the Files app, AirDrop from a computer, or download it from GitHub on the phone).
 3. Turn the extension on: **Settings → Apps → Safari → Extensions → Userscripts**. Turn it on and set **instagram.com** (or All Websites) to **Allow**.
-4. Open instagram.com in Safari and log in. Reels should be gone.
+4. Open instagram.com in Safari and log in. A pink "Reels blocked" badge flashes at the top when the script is running, and Reels should be gone.
+
+Reels a friend sends you in DMs still open, but scrolling is locked so you can't move on to other reels. If you swipe to another reel anyway, you're sent back to the chat.
 
 ### Home screen shortcut
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Insta-Block: Hide Reels
-// @description  Blocks the Reels section on instagram.com. Hides Reels links, feed reels and the Reels tab, and sends Reels pages back to your feed.
-// @version      1.1.0
+// @description  Blocks the Reels section on instagram.com. Hides Reels links, feed reels and the Reels tab, and sends Reels pages back to your feed. Reels friends send you in DMs still open, but you can't scroll from them to other reels.
+// @version      1.2.0
 // @match        *://*.instagram.com/*
 // @run-at       document-start
 // @grant        none
@@ -14,22 +14,57 @@
   const HOME = "/";
   // /reels/, /reels/<id>/, /reel/<id>/, /<user>/reels/
   const REELS_PATH = /^\/(reels?|[^/]+\/reels?)(\/|$)/;
+  // The id of a single reel: /reel/<id>/ or /reels/<id>/
+  const REEL_ID = /^\/reels?\/([A-Za-z0-9_-]+)/;
+  const DM_PATH = /^\/direct(\/|$)/;
+
   const isReelsPath = (pathname) => REELS_PATH.test(pathname);
+  const isDmPath = (pathname) => DM_PATH.test(pathname);
+  const reelId = (pathname) => (pathname.match(REEL_ID) || [])[1] || null;
   // <html> may not exist yet at document-start, so look it up when needed.
   const root = () => document.documentElement;
 
+  // ---- Remember which reel was opened from DMs -----------------------------
+  // Stored per tab, so it survives Instagram doing a full page load.
+  const store = {
+    get(key) {
+      try { return sessionStorage.getItem(key); } catch { return null; }
+    },
+    set(key, value) {
+      try { sessionStorage.setItem(key, value); } catch {}
+    },
+    del(key) {
+      try { sessionStorage.removeItem(key); } catch {}
+    },
+  };
+  const ALLOWED = "ib-allowed-reel"; // id of the one reel you may watch
+  const RETURN = "ib-return-url"; // the DM chat to go back to
+  const LAST_DM = "ib-last-dm"; // "<timestamp>|<url>" of the last DM page
+
   // ---- Hide Reels with CSS -------------------------------------------------
+  // html.ib-dm is set on DM pages, so reels friends send you stay visible.
   const css = `
     a[href="/reels/"],
     a[href^="/reels/"],
     a[href$="/reels/"],
     a[href*="/reels/?"],
-    a[href*="/reel/"],
+    html:not(.ib-dm) a[href*="/reel/"],
     article:has(a[href*="/reel/"]),
     article:has(a[href*="/reels/audio/"]) {
       display: none !important;
     }
     html.ib-redirecting body { visibility: hidden !important; }
+
+    /* Watching a reel from DMs: no scrolling to the next one */
+    html.ib-reel-lock,
+    html.ib-reel-lock body,
+    html.ib-reel-lock main,
+    html.ib-reel-lock main * {
+      overflow: hidden !important;
+      overscroll-behavior: none !important;
+      scroll-snap-type: none !important;
+    }
+    html.ib-reel-lock body { touch-action: none !important; }
   `;
   function addStyle() {
     if (document.getElementById("insta-block-style")) return;
@@ -41,37 +76,103 @@
     parent.appendChild(style);
   }
 
-  // ---- Leave Reels pages ---------------------------------------------------
+  // ---- Scroll lock while watching a reel from DMs --------------------------
+  let locked = false;
+  const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "j", "k"]);
+  function blockScroll(event) {
+    if (!locked) return;
+    if (event.type === "keydown") {
+      const t = event.target;
+      const typing = t instanceof Element && t.closest("input, textarea, [contenteditable]");
+      if (typing || !SCROLL_KEYS.has(event.key)) return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  for (const type of ["touchmove", "wheel", "keydown"]) {
+    window.addEventListener(type, blockScroll, { capture: true, passive: false });
+  }
+
+  // Keep the page classes in sync. Called often, because <html> may not
+  // exist yet the first time the script runs.
+  function syncClasses() {
+    const r = root();
+    if (!r) return;
+    r.classList.toggle("ib-dm", isDmPath(location.pathname));
+    r.classList.toggle("ib-reel-lock", locked);
+  }
+
+  function setLock(on) {
+    locked = on;
+    syncClasses();
+  }
+
+  function leave(url) {
+    setLock(false);
+    root()?.classList.add("ib-redirecting");
+    location.replace(url);
+  }
+
+  // ---- Decide what to do with the current page -----------------------------
   // Instagram is a single-page app, so watch the URL for in-app navigation.
   let lastHref = "";
   function checkLocation() {
     if (location.href === lastHref) return;
+    const previous = lastHref;
     lastHref = location.href;
-    if (isReelsPath(location.pathname)) {
-      root()?.classList.add("ib-redirecting");
-      location.replace(HOME);
-    }
-  }
+    const path = location.pathname;
 
-  // Stop taps on Reels links before Instagram's router sees them.
-  function onClick(event) {
-    const link = event.target instanceof Element && event.target.closest("a[href]");
-    if (!link) return;
-    let url;
-    try {
-      url = new URL(link.getAttribute("href"), location.href);
-    } catch {
+    syncClasses();
+
+    if (isDmPath(path)) {
+      store.set(LAST_DM, Date.now() + "|" + location.href);
+      store.del(ALLOWED);
+      store.del(RETURN);
+      setLock(false);
       return;
     }
-    if (/(^|\.)instagram\.com$/.test(url.hostname) && isReelsPath(url.pathname)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+
+    if (!isReelsPath(path)) {
+      store.del(ALLOWED);
+      store.del(RETURN);
+      store.del(LAST_DM); // left DMs for somewhere else
+      setLock(false);
+      return;
     }
+
+    // On a Reels page.
+    const id = reelId(path);
+    const allowed = store.get(ALLOWED);
+
+    if (id && allowed === id) {
+      setLock(true); // the reel you opened from DMs
+      return;
+    }
+
+    if (allowed) {
+      // Scrolled away from the DM reel: back to the chat.
+      const back = store.get(RETURN) || HOME;
+      store.del(ALLOWED);
+      store.del(RETURN);
+      leave(back);
+      return;
+    }
+
+    // Just came from a DM chat? Then this is the reel a friend sent.
+    const fromDm = previous ? new URL(previous).pathname : "";
+    const [stamp, dmUrl] = (store.get(LAST_DM) || "").split(/\|(.*)/);
+    const recentDm = stamp && Date.now() - Number(stamp) < 15000;
+    if (id && (isDmPath(fromDm) || (!previous && recentDm))) {
+      store.set(ALLOWED, id);
+      store.set(RETURN, isDmPath(fromDm) ? previous : dmUrl);
+      setLock(true);
+      return;
+    }
+
+    leave(HOME);
   }
 
-  // Hide every link that points at Reels, whether its href is relative
-  // ("/reels/") or absolute ("https://www.instagram.com/reels/"), plus the
-  // wrapper around it so it doesn't leave a gap.
+  // ---- Stop taps on Reels links before Instagram's router sees them --------
   function linkIsReels(a) {
     try {
       const url = new URL(a.getAttribute("href"), location.href);
@@ -81,16 +182,37 @@
     }
   }
 
+  function onClick(event) {
+    const link = event.target instanceof Element && event.target.closest("a[href]");
+    if (!link || !linkIsReels(link)) return;
+    // A single reel sent in a DM may be opened; everything else is blocked.
+    const path = new URL(link.getAttribute("href"), location.href).pathname;
+    if (isDmPath(location.pathname) && reelId(path)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  // ---- Hide every link that points at Reels --------------------------------
+  // Works for relative ("/reels/") and absolute
+  // ("https://www.instagram.com/reels/") hrefs, and hides the wrapper too so
+  // it doesn't leave a gap.
   function hide(el) {
     el.style.setProperty("display", "none", "important");
   }
 
   function sweep() {
+    syncClasses();
     if (!document.body) return;
     addStyle(); // re-add if Instagram rebuilt <head>
+    const inDm = isDmPath(location.pathname);
     document.querySelectorAll("a[href]:not([data-ib-checked])").forEach((a) => {
+      if (!linkIsReels(a)) {
+        a.setAttribute("data-ib-checked", "");
+        return;
+      }
+      const path = new URL(a.getAttribute("href"), location.href).pathname;
+      if (inDm && reelId(path)) return; // a reel shared in a chat: leave it
       a.setAttribute("data-ib-checked", "");
-      if (!linkIsReels(a)) return;
       hide(a);
       // A feed post that links to a reel is a reel: hide the whole post.
       const post = a.closest("article");
@@ -109,7 +231,7 @@
     });
   }
 
-  // Show a small badge for a few seconds so you can tell the script is running.
+  // ---- Small badge so you can tell the script is running -------------------
   function showBadge() {
     if (!document.body) {
       document.addEventListener("DOMContentLoaded", showBadge, { once: true });
@@ -129,6 +251,7 @@
     setTimeout(() => badge.remove(), 3000);
   }
 
+  // ---- Wire it up -----------------------------------------------------------
   let sweepQueued = false;
   new MutationObserver(() => {
     checkLocation();
