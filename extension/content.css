@@ -1,0 +1,20 @@
+/* Applied only while blocking is on (html.ib-on is toggled by content.js). */
+
+/* Reels entry in the sidebar / bottom nav, and the Reels tab on profiles */
+html.ib-on a[href="/reels/"],
+html.ib-on a[href^="/reels/"],
+html.ib-on a[href$="/reels/"],
+html.ib-on a[href*="/reels/?"],
+/* Individual reel links (Explore grid, profile grid, DMs, search) */
+html.ib-on a[href*="/reel/"],
+/* Feed posts that are reels */
+html.ib-on article:has(a[href*="/reel/"]),
+/* Video posts in the feed shown with the reels player */
+html.ib-on article:has(a[href*="/reels/audio/"]) {
+  display: none !important;
+}
+
+/* Hide the page while we redirect away from a Reels URL, so it never flashes */
+html.ib-redirecting body {
+  visibility: hidden !important;
+}

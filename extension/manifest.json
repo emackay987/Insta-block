@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Insta-Block: Hide Reels",
+  "version": "1.0.0",
+  "description": "Blocks the Reels section on instagram.com: hides Reels links, feed reels and the Reels tab, and redirects Reels pages to your feed.",
+  "permissions": ["storage", "declarativeNetRequest"],
+  "host_permissions": ["*://*.instagram.com/*"],
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "block_reels", "enabled": true, "path": "rules/block_reels.json" }
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.instagram.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "Insta-Block",
+    "default_popup": "popup/popup.html",
+    "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png" }
+  },
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "browser_specific_settings": {
+    "gecko": { "id": "insta-block@example.com", "strict_min_version": "121.0" }
+  }
+}
