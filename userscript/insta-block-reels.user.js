@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Insta-Block: Hide Reels
 // @description  Blocks the Reels section on instagram.com. Hides Reels links, feed reels and the Reels tab, and sends Reels pages back to your feed. Reels friends send you in DMs still open, but you can't scroll from them to other reels.
-// @version      1.3.0
+// @version      1.4.0
 // @match        *://*.instagram.com/*
 // @run-at       document-start
 // @grant        none
@@ -83,11 +83,9 @@
 
   // ---- Scroll lock while watching a reel from DMs --------------------------
   // Two reasons to lock:
-  //  - reelPageLock: you're on /reel/<id>/ after tapping it in a chat
-  //  - dmViewerLock: a full-screen video is open on top of a chat (Instagram
+  //  - you're on /reel/<id>/ after tapping that reel in a chat
+  //  - a full-screen video viewer is open on top of a chat (Instagram
   //    sometimes plays shared reels there without changing the address)
-  let reelPageLock = false;
-  let dmViewerLock = false;
   let locked = false;
 
   // 1) Swallow swipe and scroll gestures before Instagram's own handlers see
@@ -140,12 +138,24 @@
   }
   document.addEventListener("scroll", onScroll, { capture: true, passive: true });
 
-  // A video taking up most of the screen = a reel viewer is open.
-  function bigVideoOpen() {
+  // A reel viewer drawn on top of a chat: a video taking up most of the
+  // screen inside a pop-up layer (a dialog, or something pinned in place).
+  // Videos that are just part of the page, like previews in the chat, don't
+  // count.
+  function inPopup(el) {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      if (node.getAttribute("role") === "dialog" || node.getAttribute("aria-modal") === "true") return true;
+      if (getComputedStyle(node).position === "fixed") return true;
+    }
+    return false;
+  }
+  function popupVideoOpen() {
     const minHeight = window.innerHeight * 0.6;
     for (const video of document.getElementsByTagName("video")) {
       const box = video.getBoundingClientRect();
-      if (box.height >= minHeight && box.bottom > 0 && box.top < window.innerHeight) return true;
+      if (box.height >= minHeight && box.bottom > 0 && box.top < window.innerHeight && inPopup(video)) {
+        return true;
+      }
     }
     return false;
   }
@@ -159,9 +169,14 @@
     r.classList.toggle("ib-reel-lock", locked);
   }
 
+  // Decide from scratch, from the current address, whether to lock. Nothing
+  // is carried over, so the lock can never follow you to the home feed.
   function updateLock() {
-    dmViewerLock = isDmPath(location.pathname) && bigVideoOpen();
-    const now = reelPageLock || dmViewerLock;
+    const path = location.pathname;
+    const id = reelId(path);
+    const onSharedReel = Boolean(id) && isReelsPath(path) && store.get(ALLOWED) === id;
+    const overChat = isDmPath(path) && popupVideoOpen();
+    const now = onSharedReel || overChat;
     if (now && !locked) {
       baseline = new WeakMap();
       gestureUntil = 0;
@@ -170,8 +185,7 @@
     syncClasses();
   }
 
-  function setLock(on) {
-    reelPageLock = on;
+  function setLock() {
     updateLock();
   }
 
@@ -333,6 +347,12 @@
 
   document.addEventListener("click", onClick, true);
   window.addEventListener("popstate", checkLocation);
+  // Safari can restore a page from its back/forward cache with old state.
+  window.addEventListener("pageshow", () => {
+    lastHref = "";
+    checkLocation();
+    updateLock();
+  });
   setInterval(() => {
     checkLocation();
     updateLock();
