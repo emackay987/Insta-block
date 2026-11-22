@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Insta-Block: Hide Reels
 // @description  Blocks the Reels section on instagram.com. Hides Reels links, feed reels and the Reels tab, and sends Reels pages back to your feed. Reels friends send you in DMs still open, but you can't scroll from them to other reels.
-// @version      1.2.0
+// @version      1.3.0
 // @match        *://*.instagram.com/*
 // @run-at       document-start
 // @grant        none
@@ -55,16 +55,21 @@
     }
     html.ib-redirecting body { visibility: hidden !important; }
 
-    /* Watching a reel from DMs: no scrolling to the next one */
+    /* Watching a reel from DMs: no scrolling to the next one. Covers the
+       page, the main column and pop-up viewers drawn over the chat. */
     html.ib-reel-lock,
     html.ib-reel-lock body,
     html.ib-reel-lock main,
-    html.ib-reel-lock main * {
+    html.ib-reel-lock main *,
+    html.ib-reel-lock [role="dialog"],
+    html.ib-reel-lock [role="dialog"] *,
+    html.ib-reel-lock [role="presentation"] * {
       overflow: hidden !important;
       overscroll-behavior: none !important;
       scroll-snap-type: none !important;
     }
-    html.ib-reel-lock body { touch-action: none !important; }
+    html.ib-reel-lock body,
+    html.ib-reel-lock body * { touch-action: none !important; }
   `;
   function addStyle() {
     if (document.getElementById("insta-block-style")) return;
@@ -77,20 +82,72 @@
   }
 
   // ---- Scroll lock while watching a reel from DMs --------------------------
+  // Two reasons to lock:
+  //  - reelPageLock: you're on /reel/<id>/ after tapping it in a chat
+  //  - dmViewerLock: a full-screen video is open on top of a chat (Instagram
+  //    sometimes plays shared reels there without changing the address)
+  let reelPageLock = false;
+  let dmViewerLock = false;
   let locked = false;
+
+  // 1) Swallow swipe and scroll gestures before Instagram's own handlers see
+  //    them. Taps still work (play/pause, sound, close), since a tap doesn't
+  //    fire touchmove/pointermove.
   const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "j", "k"]);
-  function blockScroll(event) {
+  function blockGesture(event) {
     if (!locked) return;
     if (event.type === "keydown") {
       const t = event.target;
       const typing = t instanceof Element && t.closest("input, textarea, [contenteditable]");
       if (typing || !SCROLL_KEYS.has(event.key)) return;
     }
-    event.preventDefault();
-    event.stopPropagation();
+    if (event.type === "pointermove" && event.pointerType === "mouse") return;
+    if (event.cancelable) event.preventDefault();
+    event.stopImmediatePropagation();
   }
-  for (const type of ["touchmove", "wheel", "keydown"]) {
-    window.addEventListener(type, blockScroll, { capture: true, passive: false });
+  for (const type of ["touchmove", "pointermove", "wheel", "keydown"]) {
+    window.addEventListener(type, blockGesture, { capture: true, passive: false });
+  }
+
+  // 2) If something still scrolls while you're touching the screen (or for a
+  //    moment after, while momentum carries on), put it straight back.
+  //    Scrolls Instagram makes by itself, like jumping to the shared reel
+  //    when the viewer opens, are remembered as the starting point.
+  let gestureUntil = 0;
+  function markGesture() {
+    if (locked) gestureUntil = Date.now() + 1500;
+  }
+  for (const type of ["touchstart", "touchmove", "touchend", "wheel", "keydown"]) {
+    window.addEventListener(type, markGesture, { capture: true, passive: true });
+  }
+  let baseline = new WeakMap();
+  function onScroll(event) {
+    if (!locked) return;
+    const el =
+      event.target === document || event.target === document.documentElement
+        ? document.scrollingElement
+        : event.target;
+    if (!(el instanceof Element)) return;
+    const saved = baseline.get(el);
+    if (Date.now() > gestureUntil || !saved) {
+      baseline.set(el, { top: el.scrollTop, left: el.scrollLeft });
+      return;
+    }
+    if (el.scrollTop !== saved.top || el.scrollLeft !== saved.left) {
+      el.scrollTop = saved.top;
+      el.scrollLeft = saved.left;
+    }
+  }
+  document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+
+  // A video taking up most of the screen = a reel viewer is open.
+  function bigVideoOpen() {
+    const minHeight = window.innerHeight * 0.6;
+    for (const video of document.getElementsByTagName("video")) {
+      const box = video.getBoundingClientRect();
+      if (box.height >= minHeight && box.bottom > 0 && box.top < window.innerHeight) return true;
+    }
+    return false;
   }
 
   // Keep the page classes in sync. Called often, because <html> may not
@@ -102,9 +159,20 @@
     r.classList.toggle("ib-reel-lock", locked);
   }
 
-  function setLock(on) {
-    locked = on;
+  function updateLock() {
+    dmViewerLock = isDmPath(location.pathname) && bigVideoOpen();
+    const now = reelPageLock || dmViewerLock;
+    if (now && !locked) {
+      baseline = new WeakMap();
+      gestureUntil = 0;
+    }
+    locked = now;
     syncClasses();
+  }
+
+  function setLock(on) {
+    reelPageLock = on;
+    updateLock();
   }
 
   function leave(url) {
@@ -201,7 +269,7 @@
   }
 
   function sweep() {
-    syncClasses();
+    updateLock();
     if (!document.body) return;
     addStyle(); // re-add if Instagram rebuilt <head>
     const inDm = isDmPath(location.pathname);
@@ -265,7 +333,10 @@
 
   document.addEventListener("click", onClick, true);
   window.addEventListener("popstate", checkLocation);
-  setInterval(checkLocation, 500);
+  setInterval(() => {
+    checkLocation();
+    updateLock();
+  }, 500);
 
   addStyle();
   checkLocation();
