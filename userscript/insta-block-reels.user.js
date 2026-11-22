@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Insta-Block: Hide Reels
 // @description  Blocks the Reels section on instagram.com. Hides Reels links, feed reels and the Reels tab, and sends Reels pages back to your feed. Reels friends send you in DMs still open, but you can't scroll from them to other reels.
-// @version      1.5.0
+// @version      1.6.0
 // @match        *://*.instagram.com/*
 // @run-at       document-start
 // @grant        none
@@ -15,7 +15,7 @@
   // /reels/, /reels/<id>/, /reel/<id>/, /<user>/reels/
   const REELS_PATH = /^\/(reels?|[^/]+\/reels?)(\/|$)/;
   // The id of a single reel: /reel/<id>/ or /reels/<id>/
-  const REEL_ID = /^\/reels?\/([A-Za-z0-9_-]+)/;
+  const REEL_ID = /^\/reels?\/(?!audio\/)([A-Za-z0-9_-]+)/;
   const DM_PATH = /^\/direct(\/|$)/;
 
   const isReelsPath = (pathname) => REELS_PATH.test(pathname);
@@ -44,35 +44,31 @@
   // ---- Hide Reels with CSS -------------------------------------------------
   // html.ib-dm is set on DM pages, so reels friends send you stay visible.
   const css = `
-    a[href="/reels/"],
-    a[href^="/reels/"],
-    a[href$="/reels/"],
-    a[href*="/reels/?"],
-    html:not(.ib-dm) a[href*="/reel/"] {
+    /* Reels links outside feed posts (nav, profile tab, grids, search).
+       Links inside posts are left in place so post sizes never change. */
+    a[href="/reels/"]:not(article a),
+    a[href^="/reels/"]:not(article a),
+    a[href$="/reels/"]:not(article a),
+    a[href*="/reels/?"]:not(article a),
+    html:not(.ib-dm) a[href*="/reel/"]:not(article a) {
       display: none !important;
     }
 
-    /* Reel posts in the feed shrink to a small strip instead of vanishing.
-       Taking them out of the layout entirely (zero height) confuses
-       Instagram's feed as it loads more posts and makes it jump to the top. */
+    /* Reel posts in the feed keep their exact size; only what's inside is
+       blanked out. Instagram's feed tracks post heights to decide what to
+       draw and when to load more, so changing a post's size makes it jump
+       to the top or stop loading. */
     article.ib-reel-post,
-    article:has(a[href*="/reel/"]),
-    article:has(a[href*="/reels/audio/"]) {
+    article:has(a[href*="/reel/"]) {
       position: relative !important;
-      height: 44px !important;
-      min-height: 44px !important;
-      max-height: 44px !important;
-      overflow: hidden !important;
       pointer-events: none !important;
     }
-    article.ib-reel-post > *,
-    article:has(a[href*="/reel/"]) > *,
-    article:has(a[href*="/reels/audio/"]) > * {
+    article.ib-reel-post *,
+    article:has(a[href*="/reel/"]) * {
       visibility: hidden !important;
     }
     article.ib-reel-post::after,
-    article:has(a[href*="/reel/"])::after,
-    article:has(a[href*="/reels/audio/"])::after {
+    article:has(a[href*="/reel/"])::after {
       content: "Reel hidden";
       visibility: visible;
       position: absolute;
@@ -318,7 +314,7 @@
     addStyle(); // re-add if Instagram rebuilt <head>
     // Hidden reel posts shouldn't keep playing out of sight.
     document
-      .querySelectorAll('article.ib-reel-post video, article:has(a[href*="/reel/"]) video')
+      .querySelectorAll("article.ib-reel-post video")
       .forEach((v) => {
         v.muted = true;
         if (!v.paused) v.pause();
@@ -332,11 +328,11 @@
       const path = new URL(a.getAttribute("href"), location.href).pathname;
       if (inDm && reelId(path)) return; // a reel shared in a chat: leave it
       a.setAttribute("data-ib-checked", "");
-      // A feed post that links to a reel is a reel: shrink it to a strip
-      // (see CSS) rather than hiding it, so the feed doesn't jump.
+      // Inside a feed post, never hide or resize anything (that makes the
+      // feed jump). If the post is a reel, blank it out instead (see CSS).
       const post = a.closest("article");
       if (post) {
-        post.classList.add("ib-reel-post");
+        if (reelId(path)) post.classList.add("ib-reel-post");
         return;
       }
       hide(a);
