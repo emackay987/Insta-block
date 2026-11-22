@@ -22,7 +22,25 @@ A browser extension that blocks the **Reels** section on instagram.com.
 2. Click **Load Temporary Add-on…** and pick `extension/manifest.json`.
    (Temporary add-ons are removed when Firefox restarts. To keep it installed, sign it through addons.mozilla.org.)
 
+## iPhone / iPad (Safari)
+
+The Instagram app can't be modified, but Instagram in Safari can. Use the script in `userscript/` with the free **Userscripts** app.
+
+1. Install **Userscripts** from the App Store and open it once. It asks you to pick a folder for scripts (for example `iCloud Drive/Userscripts`).
+2. Copy `userscript/insta-block-reels.user.js` into that folder (from the Files app, AirDrop from a computer, or download it from GitHub on the phone).
+3. Turn the extension on: **Settings → Apps → Safari → Extensions → Userscripts**. Turn it on and set **instagram.com** (or All Websites) to **Allow**.
+4. Open instagram.com in Safari and log in. Reels should be gone.
+
+### Home screen shortcut
+
+Safari extensions only run in Safari itself, **not** in home-screen web apps. Make sure your shortcut opens Safari:
+
+- **Shortcuts app:** New shortcut → **Open URLs** → `https://www.instagram.com/` → Share → **Add to Home Screen**. This always opens in Safari.
+- **Or from Safari:** Share → **Add to Home Screen**, and turn **off** "Open as Web App".
+
+Then delete the Instagram app (or lock it with a Screen Time limit) so you use the Safari version.
+
 ## Notes
 
-- This works on Instagram **in a web browser** only. A browser extension can't change the Instagram phone app.
+- This works on Instagram **in a web browser** only (including Safari on iPhone, above). Nothing can change the Instagram phone app itself.
 - Instagram changes its page markup often. The extension matches on link URLs (`/reel/`, `/reels/`), which change much less often than class names, but if something slips through, open an issue.
